@@ -43,3 +43,12 @@ module Bayes where
     let (randomNumber, stdg') = randomR (0, n) stdg
     in getTrainSet (n-1) rows (tRows ++ [rows !! randomNumber]) stdg'
   getTrainSet _ rows tRows _ = (rows, tRows)
+
+  mean :: [Double] -> Double
+  mean xs = sum xs / realToFrac (length xs)
+
+  standardDeviation :: [Double] -> Double
+  standardDeviation xs = let average = mean xs
+                             variance = sum (fmap (\x -> (x - average) ** 2) xs)
+                                        / realToFrac (length xs - 1)
+                         in sqrt variance
