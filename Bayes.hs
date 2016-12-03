@@ -7,18 +7,17 @@ module Bayes where
   import System.Directory (getCurrentDirectory)
   import Data.List (transpose)
   import Data.Char (isDigit)
+  import Control.Arrow
 
   main :: IO ()
   main = do
     currentDir <- getCurrentDirectory
     file       <- readFile (currentDir ++ "/pima-indians-diabetes.csv")
     stdGen     <- getStdGen
-    print $ readDataSet 0.67 True (T.pack file) stdGen
-
-  type TextTable = [[T.Text]]
-  type Row   = [Double]
-  type Mean = Double
-  type StandardDeviation = Double
+    print $ let dataset = readDataSet 0.67 True (T.pack file) stdGen
+                testSummary  = summarizeColumns $ testing dataset
+                trainSummary = summarizeColumns $ training dataset
+            in (testSummary, trainSummary)
 
   data Column = TextColumn [T.Text]
               | NumericColumn [Double]
@@ -74,7 +73,7 @@ module Bayes where
   isNumber = T.all (\c -> isDigit c || c == '.')
 
   -- | Calculates the mean of a column
-  mean :: Column -> Mean
+  mean :: Column -> Double
   mean (NumericColumn xs) = sum xs / realToFrac (length xs)
   mean (TextColumn xs)    = undefined
 
@@ -82,7 +81,7 @@ module Bayes where
   -- on one function since you
   -- dont need to pattern match :D
 
-  standardDeviation :: Column -> StandardDeviation
+  standardDeviation :: Column -> Double
   standardDeviation nc@(NumericColumn xs) =
     let average  = mean nc
         variance = sum (fmap (\x -> (x - average) ** 2) xs) / realToFrac (length xs - 1)
@@ -92,3 +91,6 @@ module Bayes where
   calculateProbability :: Double -> Double -> Double -> Double
   calculateProbability x mean' stdev = (1 / (sqrt (2 * pi) * stdev)) * exponent'
     where exponent' = exp(- ((x - mean') ** 2) / (2 * (stdev ** 2)))
+
+  summarizeColumns :: [Column] -> [(Double, Double)]
+  summarizeColumns = fmap (mean &&& standardDeviation)
