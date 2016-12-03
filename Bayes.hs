@@ -6,70 +6,89 @@ module Bayes where
   import System.Random
   import System.Directory (getCurrentDirectory)
   import Data.List (transpose)
+  import Data.Char (isDigit)
 
   main :: IO ()
   main = do
     currentDir <- getCurrentDirectory
     file       <- readFile (currentDir ++ "/pima-indians-diabetes.csv")
     stdGen     <- getStdGen
-    print $ let dataset = readDataSet $ readTable $ T.pack file
-                (testing, train) = readTestingTraining 0.67 (fields dataset) stdGen
-            in probabilityPerClass 22 dataset
+    print $ readDataSet 0.67 True (T.pack file) stdGen
 
-  type Table = [[T.Text]]
+  type TextTable = [[T.Text]]
   type Row   = [Double]
-  type Class = T.Text
   type Mean = Double
   type StandardDeviation = Double
-  type Probability = Double
 
-  data DataSet = DataSet { header :: [Class] , fields  :: [Row] } deriving Show
+  data Column = TextColumn [T.Text]
+              | NumericColumn [Double]
+              deriving Show
 
-  readTable :: T.Text -> Table
-  readTable = fmap (T.splitOn (T.pack ",")) . T.lines
+  -- | A data set for the Naive Bayes Classification
+  data DataSet = DataSet
+      { headers   :: Maybe [T.Text]  -- ^ Optional headers
+      , testing  :: ![Column]      -- ^ Testing part of the data set
+      , training :: ![Column]      -- ^ Training part of the data set
+      } deriving Show
 
-  readDataSet :: Table -> DataSet
-  readDataSet (x:xs) = DataSet x (readValues xs)
-  readDataSet _      = error "Data set requires atleast 2 rows"
+  -- | Reads the dataset based on the sr as split ratio for training, headers
+  -- based on if the csv has headers and content as the Text type of reading the
+  -- file and StdGen from the IO action to get a randomized value generator.
+  readDataSet :: Double -> Bool -> T.Text -> StdGen -> DataSet
+  readDataSet sr hasHeaders content stdGen =
+    let (x:xs)    = (fmap (T.splitOn $ T.pack ",") . T.lines) content -- Read the csv in as a [[Text]]
+        (h, tc)   = if hasHeaders -- Optional header plus columns in Text form
+                      then (Just x, xs)
+                      else (Nothing, x:xs)
+        trainSize = round $ realToFrac (length tc) * sr
+        trainSet  = createTrainingSet tc trainSize stdGen
+        columns   = fmap createColumn (transpose tc) -- creates the Text Columns into Column
+    in DataSet h columns trainSet
 
-  readValues :: [[T.Text]] -> [Row]
-  readValues = fmap (fmap (read . T.unpack))
+  -- | Creates the training set based on the rows from the csv and the training
+  -- size results in StdGen -> [Column]
+  createTrainingSet :: [[T.Text]] -> Int -> StdGen -> [Column]
+  createTrainingSet rows size =
+    fmap createColumn . transpose . randomRows size (length rows) rows
 
-  -- | Results in (Testing, Train)
-  -- | MAKE PRETIER
-  readTestingTraining :: Double -> [Row] -> StdGen -> ([Row], [Row])
-  readTestingTraining splitRatio rows stdg =
-    let trainSize = round (realToFrac (length rows) * splitRatio) :: Int
-    in getTrainSet trainSize rows [] stdg
+  -- | Creates a list of rows randomly picked from the current rows of the csv
+  -- Flow: Creates a list of random numbers between 0 and total size of the csv
+  -- takes from the infinite list an amount equal to the training size
+  -- based on these numbers it will create a new rows by using addRow
+  randomRows :: Int -> Int -> [[T.Text]] -> StdGen -> [[T.Text]]
+  randomRows n total cr = foldl addRow [] . take n . randomRs (0, total - 1)
+    where addRow nr i = (cr !! i) : nr
 
-  -- | MAKE PRETIER
-  getTrainSet :: Int -> [Row] -> [Row] -> StdGen -> ([Row], [Row])
-  getTrainSet n rows tRows stdg | length tRows < n =
-    let (randomNumber, stdg') = randomR (0, n) stdg
-    in getTrainSet (n-1) rows (tRows ++ [rows !! randomNumber]) stdg'
-  getTrainSet _ rows tRows _ = (rows, tRows)
+  -- | Reads a list of text into a single column, Naive Bayes Classification
+  -- uses columns intensively so for efficiency the data will be transported
+  -- directly to columns instead of per calculation
+  createColumn :: [T.Text] -> Column
+  createColumn cols@(x:_)
+    | isNumber x = NumericColumn $ fmap (read . T.unpack) cols
+    | otherwise  = TextColumn cols
 
-  mean :: [Double] -> Mean
-  mean xs = sum xs / realToFrac (length xs)
+  -- | Helper function to check wether a text value is a double
+  -- Could fail on values that are numbers and have more dots, but that probably
+  -- won't be the case in most csv files.
+  isNumber :: T.Text -> Bool
+  isNumber = T.all (\c -> isDigit c || c == '.')
 
-  standardDeviation :: [Double] -> StandardDeviation
-  standardDeviation xs = let average = mean xs
-                             variance = sum (fmap (\x -> (x - average) ** 2) xs)
-                                        / realToFrac (length xs - 1)
-                         in sqrt variance
+  -- | Calculates the mean of a column
+  mean :: Column -> Mean
+  mean (NumericColumn xs) = sum xs / realToFrac (length xs)
+  mean (TextColumn xs)    = undefined
 
-  summarizePerClass :: DataSet -> [(Class, (Mean, StandardDeviation))]
-  summarizePerClass ds = fmap summarize (zip [0..] classes)
-    where classes = header ds
-          columns = transpose $ fields ds
-          summarize (i, name) = let column = columns !! i
-                                in (name,(mean column, standardDeviation column))
+  -- add variance function:: Column -> Double and define standard deviation only
+  -- on one function since you
+  -- dont need to pattern match :D
+
+  standardDeviation :: Column -> StandardDeviation
+  standardDeviation nc@(NumericColumn xs) =
+    let average  = mean nc
+        variance = sum (fmap (\x -> (x - average) ** 2) xs) / realToFrac (length xs - 1)
+    in sqrt variance
+  standardDeviation (TextColumn xs)   = undefined
 
   calculateProbability :: Double -> Double -> Double -> Double
   calculateProbability x mean' stdev = (1 / (sqrt (2 * pi) * stdev)) * exponent'
     where exponent' = exp(- ((x - mean') ** 2) / (2 * (stdev ** 2)))
-
-  -- | NO TIMES INCOPERATED BUGS!!!  
-  probabilityPerClass :: Double -> DataSet -> [(Class, Probability)]
-  probabilityPerClass x ds = fmap (\(c, (m, sd)) -> (c, calculateProbability x m sd)) sumarized
-    where sumarized = summarizePerClass ds
