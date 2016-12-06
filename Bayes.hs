@@ -5,8 +5,9 @@ module Bayes where
   import qualified Data.Text as T
   import System.Random
   import System.Directory (getCurrentDirectory)
-  import Data.List (transpose)
+  import Data.List (transpose, maximumBy)
   import Data.Char (isDigit)
+  import Data.Function (on)
   import Control.Arrow
 
   main :: IO ()
@@ -88,9 +89,23 @@ module Bayes where
     in sqrt variance
   standardDeviation (TextColumn xs)   = undefined
 
+  -- | Contains bug returns propabilities > 1
   calculateProbability :: Double -> Double -> Double -> Double
-  calculateProbability x mean' stdev = (1 / (sqrt (2 * pi) * stdev)) * exponent'
-    where exponent' = exp(- ((x - mean') ** 2) / (2 * (stdev ** 2)))
+  calculateProbability x avg stdev = (1 / (sqrt (2 * pi) * stdev)) * exponent'
+    where exponent' = exp(- ((x - avg) ** 2) / (2 * (stdev ** 2)))
 
   summarizeColumns :: [Column] -> [(Double, Double)]
   summarizeColumns = fmap (mean &&& standardDeviation)
+
+  classProbabilities :: [Double] -> [(Double, Double)] -> [Double]
+  classProbabilities input = foldl prob []
+    where prob acc (m, sd) = acc ++ [foldl (probClass m sd) 1 input]
+          probClass m' sd' x i = x * calculateProbability i m' sd'
+
+  -- | Calculates class probabilties resulting in the max probability of the class
+  -- index
+  predict :: [Double] -> [(Double, Double)] -> (Integer, Double)
+  predict xs = maximumBy (compare `on` snd) . zip [1..] . classProbabilities xs
+
+  predicts :: [[Double]] -> [(Double, Double)] -> [(Integer, Double)]
+  predicts xss summaries = fmap (`predict` summaries) xss
