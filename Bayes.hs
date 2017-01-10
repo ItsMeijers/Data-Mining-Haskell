@@ -5,7 +5,7 @@ module Bayes where
   import qualified Data.Text as T
   import System.Random
   import System.Directory (getCurrentDirectory)
-  import Data.List (transpose, maximumBy)
+  import Data.List (transpose, maximumBy, genericLength)
   import Data.Char (isDigit)
   import Data.Function (on)
   import Control.Arrow
@@ -26,7 +26,7 @@ module Bayes where
 
   -- | A data set for the Naive Bayes Classification
   data DataSet = DataSet
-      { headers   :: Maybe [T.Text]  -- ^ Optional headers
+      { headers  :: Maybe [T.Text]  -- ^ Optional headers
       , testing  :: ![Column]      -- ^ Testing part of the data set
       , training :: ![Column]      -- ^ Training part of the data set
       } deriving Show
@@ -89,7 +89,7 @@ module Bayes where
     in sqrt variance
   standardDeviation (TextColumn xs)   = undefined
 
-  -- | Contains bug returns propabilities > 1
+  -- | Calculates density can be over >1 research a bit more...
   calculateProbability :: Double -> Double -> Double -> Double
   calculateProbability x avg stdev = (1 / (sqrt (2 * pi) * stdev)) * exponent'
     where exponent' = exp(- ((x - avg) ** 2) / (2 * (stdev ** 2)))
@@ -109,3 +109,8 @@ module Bayes where
 
   predicts :: [[Double]] -> [(Double, Double)] -> [(Integer, Double)]
   predicts xss summaries = fmap (`predict` summaries) xss
+
+  -- | Compares testsset values with the predicted set values
+  accuracy :: Eq a => [a] -> [a] -> Double
+  accuracy ts ps = (genericLength equalPredicts / genericLength ts) * 100.0
+    where equalPredicts = filter (uncurry (==)) $ zip ts ps
