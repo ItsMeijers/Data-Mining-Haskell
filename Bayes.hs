@@ -5,7 +5,7 @@ module Bayes where
   import qualified Data.Text as T
   import System.Random
   import System.Directory (getCurrentDirectory)
-  import Data.List (transpose, maximumBy, genericLength)
+  import Data.List (transpose, maximumBy, genericLength, foldl')
   import Data.Char (isDigit)
   import Data.Function (on)
   import Control.Arrow
@@ -56,7 +56,7 @@ module Bayes where
   -- takes from the infinite list an amount equal to the training size
   -- based on these numbers it will create a new rows by using addRow
   randomRows :: Int -> Int -> [[T.Text]] -> StdGen -> [[T.Text]]
-  randomRows n total cr = foldl addRow [] . take n . randomRs (0, total - 1)
+  randomRows n total cr = foldl' addRow [] . take n . randomRs (0, total - 1)
     where addRow nr i = (cr !! i) : nr
 
   -- | Reads a list of text into a single column, Naive Bayes Classification
@@ -98,8 +98,8 @@ module Bayes where
   summarizeColumns = fmap (mean &&& standardDeviation)
 
   classProbabilities :: [Double] -> [(Double, Double)] -> [Double]
-  classProbabilities input = foldl prob []
-    where prob acc (m, sd) = acc ++ [foldl (probClass m sd) 1 input]
+  classProbabilities input = foldl' prob []
+    where prob acc (m, sd) = acc ++ [foldl' (probClass m sd) 1 input]
           probClass m' sd' x i = x * calculateProbability i m' sd'
 
   -- | Calculates class probabilties resulting in the max probability of the class
