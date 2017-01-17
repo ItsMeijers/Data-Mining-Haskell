@@ -1,8 +1,13 @@
 module DecisionTree where
   import Data.List (nub, genericLength)
-  import Control.Applicative ((<$>))
+  import Control.Applicative
+  import Data.Traversable
+  import Data.Foldable hiding (sum)
+  import Data.Monoid (mappend)
   import Control.Monad (ap, liftM)
-  import Data.Traversable (for)
+  import qualified Data.Foldable ()
+  import qualified Data.Traversable ()
+  import qualified Control.Applicative ()
 
   -- | A DecisionTree consists of either a Node or Leaf
   -- The Leaf contains a value for the classification
@@ -39,6 +44,7 @@ module DecisionTree where
   -- | Instance of the Monad typeclass for DecisionTree
   -- Makes it possible to dependent sequencing over DecisionTrees
   instance Monad DecisionTree where
+      return = pure
       (Leaf a)    >>= f = f a
       (Node a ta) >>= f = case f a of
           (Leaf b)    -> Node b (fmap (>>= f) ta)
@@ -52,6 +58,8 @@ module DecisionTree where
   entropy xs = sum $ (\c -> negate (p c) * logBase 2.0 (p c)) <$> nub xs
     where p c' = genericLength (filter (c' ==) xs) / genericLength xs
 
-  -- f is probably of different form
-  gain :: Eq a => [a] -> a -> Double
-  gain xs f = entropy xs - sum ((\t -> undefined) <$> xs)
+  -- | Calculates the gain of two lists
+  gain :: Eq a => [a] -> [a] -> Double
+  gain xs ys = entropy xs - sum (fmap (\t -> p t * entropy t) tss)
+    where p t' = genericLength t' / genericLength xs
+          tss = fmap (\x -> fmap fst $ filter ((==) x . snd) $ zip xs ys) (nub ys)
