@@ -1,84 +1,119 @@
 module DecisionTree where
   import System.Directory (getCurrentDirectory)
   import qualified Data.Text as T
-  import Data.List (nub, genericLength, transpose, sortBy)
-  import Control.Applicative
-  import Data.Traversable
+  import Data.List (nub, genericLength, transpose)
   import Data.Foldable hiding (sum)
-  import Data.Monoid (mappend)
-  import Control.Monad (ap, liftM)
-  import qualified Data.Foldable ()
-  import qualified Data.Traversable ()
-  import qualified Control.Applicative ()
+  import Control.Arrow (second, (&&&))
+  import Training (splitR)
+  import System.Random (getStdGen)
+  import Data.Maybe (fromJust, fromMaybe, catMaybes)
+
+  test :: [T.Text]
+  test = fmap T.pack ["x","y","n","t","l","f","c","b","p","e","r","s","y","w","w","p","w","o","p","n","y"]
 
   main :: IO ()
   main = do
     currentDir <- getCurrentDirectory
-    file       <- readFile (currentDir ++ "/dtree.csv")
-    print $ let (x:xs)  = fmap (T.splitOn $ T.pack ",") $ T.lines $ T.pack file
-                columns = zip x (transpose xs)
-            in build (snd (last columns)) (init columns)
+    _          <- putStrLn "Name of the CSV to classify:"
+    fileName   <- getLine
+    file       <- readFile (currentDir ++ "/" ++ fileName)
+    _          <- putStrLn "Specify a comma seperated test set to classify:"
+    testInput  <- getLine
+    print (classifyTest file testInput)
+
+  classifyTest :: String -> String -> Result
+  classifyTest = undefined
+
+  data Result = Result
+    { percentage :: Double
+    , testSet    :: String
+    , outCome    :: String
+    }
+
+  instance Show Result where
+    show result = "The classification of: " ++
+                  testSet result            ++
+                  " resulted in: "          ++
+                  outCome result            ++
+                  " with an accuracy of: "  ++
+                  show (percentage result)  ++
+                  " percent."
 
   -- | A DecisionTree consists of either a Node or Leaf
-  -- The Leaf contains a value for the classification
-  -- A Node contains an attribute of the data (a) and a List of Tuple2
-  -- where the first element is the predicate to that specific child, the
-  -- second element
+  -- A node has multiple branches and a Leaf has the classification value
   data DecisionTree a = Node a [Branch a]
                       | Leaf a
                       deriving Show
 
+  -- | A branch has a tag a value and child DecisionTree attached to it
   data Branch a = Branch a (DecisionTree a) deriving Show
 
-  -- -- | Instance of the Foldable typeclass for DecisionTree
-  -- -- Makes it possible to call fold functions
-  -- instance Foldable DecisionTree where
-  --     foldMap f (Node a ts) = f a `mappend` foldMap (foldMap f) ts
-  --     foldMap f (Leaf a)    = f a
-  --
-  -- -- | Instance of the Traversable typeclass for DecisionTree
-  -- -- Makes it possible to traverse over DecisionTrees
-  -- instance Traversable DecisionTree where
-  --     traverse f (Leaf a)    = Leaf <$> f a
-  --     traverse f (Node a ts) = Node <$> f a <*> for ts (traverse f)
-  --
-  -- -- | Instance of the Functor typeclass for DecisionTree
-  -- -- Makes it possible to map over DecisionTrees
-  -- instance Functor DecisionTree where
-  --     fmap = liftM
-  --
-  -- -- | Instance of the Applicative Functor typeclass for DecisionTree
-  -- -- Makes it possible to have sequential application over DecisionTrees
-  -- instance Applicative DecisionTree where
-  --     pure  = Leaf
-  --     (<*>) = ap
-  --
-  -- -- | Instance of the Monad typeclass for DecisionTree
-  -- -- Makes it possible to dependent sequencing over DecisionTrees
-  -- instance Monad DecisionTree where
-  --     return = pure
-  --     (Leaf a)    >>= f = f a
-  --     (Node a ta) >>= f = case f a of
-  --         (Leaf b)    -> Node b (fmap (>>= f) ta)
-  --         (Node b tb) -> Node b (tb `mappend` fmap (>>= f) ta)
+  -- | Getter of the tag of a Branch
+  tag :: Branch a -> a
+  tag (Branch a _) = a
 
-  -- | Calculates the entropy of a List
-  -- applies the lambda over unique elements of xs (by using nub) and sums
-  -- the results
-  -- Note that <$> is a infix notation of fmap
+  -- | Getter of the decision tree attached to a Branch
+  cons :: Branch a -> DecisionTree a
+  cons (Branch _ dt) = dt
+
+  -- | Calculates the entropy for a List
   entropy :: Eq a => [a] -> Double
   entropy xs = sum $ (\c -> negate (p c) * logBase 2.0 (p c)) <$> nub xs
-    where p c' = genericLength (filter (c' ==) xs) / genericLength xs
+    where p c'     = genericLength (filter (c' ==) xs) / xsLength
+          xsLength = genericLength xs
 
-  -- | Calculates the gain of two lists
+  -- | Calculates the gain for two lists
   gain :: Eq a => [a] -> [a] -> Double
   gain xs ys = entropy xs - sum (fmap (\t -> p t * entropy t) tss)
     where p t'     = genericLength t' / genericLength xs
           tss      = fmap subset (nub ys)
-          subset x = fmap fst $ filter ((==) x . snd) $ zip xs ys
+          subset x = fmap fst . filter ((==) x . snd) $ zip xs ys
 
-  build :: Eq a => [a] -> [(a, [a])] -> DecisionTree a
-  build xs tss = Node n (fmap (\b -> Branch b (Leaf b)) (nub ns))
-    where withGain   = fmap (\(t, ts) -> (t, ts, gain xs ts)) tss
-          sorted     = sortBy (\(_, _, g) (_, _, g') -> compare g' g) withGain
-          (n, ns, _) = head sorted
+  -- | Builds the tree based on ID3 algorithm
+  -- cs is a list of class attributes that form the goal of the classifier
+  -- tss is the table where the first element of the tuple is the header and
+  -- the second element is a list that represents the column values
+  buildTree :: Eq a => [a] -> [(a, [a])] -> DecisionTree a
+  buildTree cs tss
+    | allTheSame cs = Leaf (head cs)
+    | otherwise     = uncurry Node $ buildBranches cs tss
+
+  -- | Helper that checks wether all the elements in a list are the same
+  -- (empty is false)
+  allTheSame :: Eq a => [a] -> Bool
+  allTheSame [] = False
+  allTheSame xs = all (== head xs) (tail xs)
+
+  -- | Builds the branches based on Gain and Entropy
+  -- Is recursively called from and to buildTree
+  buildBranches :: Eq a => [a] -> [(a, [a])] -> (a, [Branch a])
+  buildBranches cs tss = (s, fmap dBranch (nub fs))
+      where withGain    = fmap (\(t, ts) -> (t, ts, gain cs ts)) tss
+            (s, fs, ga) = maximumBy (\(_, _, g) (_, _, g') -> compare g g') withGain
+            dBranch a   = if ga == 0
+                then Branch a . Leaf $ head cs
+                else Branch a . uncurry buildTree $ extractSubset s a fs cs tss
+
+  extractSubset :: Eq a => a -> a -> [a] -> [a] -> [(a, [a])] -> ([a], [(a, [a])])
+  extractSubset extract f fs xs table =
+      let fs'     = fmap (f ==) fs                     -- see where all the feature equals the element in the list
+          xs'     = fmap snd (filter fst (zip fs' xs)) -- filter it out for the goal set
+          table'  = filter ((/=) extract . fst) table  -- filter the table without the already selected column
+          table'' = fmap (second $ fmap snd . filter fst . zip fs') table' -- filter out all the other columns on the selected feature
+      in  (xs', table'')
+
+  classify :: Eq a => DecisionTree a -> [(a, a)] -> Maybe a
+  classify (Node a bs) xs = do
+      (_, feature) <- find ((==a) . fst) xs
+      branch       <- find ((==feature) . tag) bs
+      case cons branch of
+          (Leaf o) -> Just o
+          node     -> classify node (filter ((feature /=) . snd) xs)
+  classify _ _ = Nothing
+
+  accuracy :: Eq a => [[(a, a)]] -> [a] -> DecisionTree a -> Double
+  accuracy ts es tree = (genericLength success / genericLength ts) * 100
+    where equals (Just a, a') = a == a'
+          equals (Nothing, _) = False
+          classifiedResult    = zip (fmap (classify tree) ts) es
+          success             = filter equals classifiedResult
