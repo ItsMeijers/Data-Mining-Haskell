@@ -2,11 +2,12 @@ module DecisionTree where
   import System.Directory (getCurrentDirectory)
   import qualified Data.Text as T
   import Data.List (nub, genericLength, transpose)
+  import Data.List.Split (splitOn)
   import Data.Foldable hiding (sum)
   import Control.Arrow (second, (&&&))
-  import Training (splitR)
-  import System.Random (getStdGen)
-  import Data.Maybe (fromJust, fromMaybe, catMaybes)
+  import Training (splitRandom, createRowsFrom)
+  import System.Random (getStdGen, StdGen)
+  import Data.Maybe (fromMaybe, catMaybes)
 
   test :: [T.Text]
   test = fmap T.pack ["x","y","n","t","l","f","c","b","p","e","r","s","y","w","w","p","w","o","p","n","y"]
@@ -19,25 +20,40 @@ module DecisionTree where
     file       <- readFile (currentDir ++ "/" ++ fileName)
     _          <- putStrLn "Specify a comma seperated test set to classify:"
     testInput  <- getLine
-    print (classifyTest file testInput)
+    stdGen     <- getStdGen
+    print (classifyTest file testInput stdGen)
 
-  classifyTest :: String -> String -> Result
-  classifyTest = undefined
+  --classifyTest :: String -> String -> StdGen -> Result
+  classifyTest file testInput stdGen =
+    let (headers, rows)     = createRowsFrom file
+        (trainSet, testSet) = splitRandom (1/3) rows stdGen
+        testToClassify      = parseInput testInput
+        --tree                = buildTreeWith headers testSet
+        --classifiedTest      = classify tree (zip headers testToClassify)
+        trainSet'           = fmap (head &&& tail) trainSet
+        --trainingRatio       = accuracy undefined undefined tree
+    in trainSet --maybe NoResult (Result trainingRatio testInput) classifiedTest
 
-  data Result = Result
-    { percentage :: Double
-    , testSet    :: String
-    , outCome    :: String
-    }
+  parseInput :: String -> [String]
+  parseInput = splitOn ","
+
+
+  data Result = NoResult
+              | Result
+                { percentage :: Double
+                , testSet    :: String
+                , outCome    :: String
+                }
 
   instance Show Result where
-    show result = "The classification of: " ++
-                  testSet result            ++
-                  " resulted in: "          ++
-                  outCome result            ++
-                  " with an accuracy of: "  ++
-                  show (percentage result)  ++
-                  " percent."
+    show NoResult = "No Result due to error."
+    show result   = "The classification of: " ++
+                    testSet result            ++
+                    " resulted in: "          ++
+                    outCome result            ++
+                    " with an accuracy of: "  ++
+                    show (percentage result)  ++
+                    " percent."
 
   -- | A DecisionTree consists of either a Node or Leaf
   -- A node has multiple branches and a Leaf has the classification value
@@ -78,29 +94,30 @@ module DecisionTree where
     | allTheSame cs = Leaf (head cs)
     | otherwise     = uncurry Node $ buildBranches cs tss
 
+  -- | Builds the branches based on Gain and Entropy
+  -- Is recursively called from and to buildTree
+  buildBranches :: Eq a => [a] -> [(a, [a])] -> (a, [Branch a])
+  buildBranches cs tss = (s, fmap dBranch (nub fs))
+    where withGain    = fmap (\(t, ts) -> (t, ts, gain cs ts)) tss
+          (s, fs, ga) = maximumBy (\(_, _, g) (_, _, g') -> compare g g') withGain
+          dBranch a   = if ga == 0 -- TODO ADD IF GA == 1 SINCE THE OUTCOME THEN IS EQUAL!!!!!!!!!!!!!!!!!!! TODO
+              then Branch a . Leaf $ head cs
+              else Branch a . uncurry buildTree $ extractSubset s a fs cs tss
+
+  extractSubset :: Eq a => a -> a -> [a] -> [a] -> [(a, [a])] -> ([a], [(a, [a])])
+  extractSubset extract f fs xs table =
+    let fs'     = fmap (f ==) fs                     -- see where all the feature equals the element in the list
+        xs'     = fmap snd (filter fst (zip fs' xs)) -- filter it out for the goal set
+        table'  = filter ((/=) extract . fst) table  -- filter the table without the already selected column
+        table'' = fmap (second $ fmap snd . filter fst . zip fs') table' -- filter out all the other columns on the selected feature
+    in  (xs', table'')
+
+
   -- | Helper that checks wether all the elements in a list are the same
   -- (empty is false)
   allTheSame :: Eq a => [a] -> Bool
   allTheSame [] = False
   allTheSame xs = all (== head xs) (tail xs)
-
-  -- | Builds the branches based on Gain and Entropy
-  -- Is recursively called from and to buildTree
-  buildBranches :: Eq a => [a] -> [(a, [a])] -> (a, [Branch a])
-  buildBranches cs tss = (s, fmap dBranch (nub fs))
-      where withGain    = fmap (\(t, ts) -> (t, ts, gain cs ts)) tss
-            (s, fs, ga) = maximumBy (\(_, _, g) (_, _, g') -> compare g g') withGain
-            dBranch a   = if ga == 0
-                then Branch a . Leaf $ head cs
-                else Branch a . uncurry buildTree $ extractSubset s a fs cs tss
-
-  extractSubset :: Eq a => a -> a -> [a] -> [a] -> [(a, [a])] -> ([a], [(a, [a])])
-  extractSubset extract f fs xs table =
-      let fs'     = fmap (f ==) fs                     -- see where all the feature equals the element in the list
-          xs'     = fmap snd (filter fst (zip fs' xs)) -- filter it out for the goal set
-          table'  = filter ((/=) extract . fst) table  -- filter the table without the already selected column
-          table'' = fmap (second $ fmap snd . filter fst . zip fs') table' -- filter out all the other columns on the selected feature
-      in  (xs', table'')
 
   classify :: Eq a => DecisionTree a -> [(a, a)] -> Maybe a
   classify (Node a bs) xs = do
@@ -112,8 +129,8 @@ module DecisionTree where
   classify _ _ = Nothing
 
   accuracy :: Eq a => [[(a, a)]] -> [a] -> DecisionTree a -> Double
-  accuracy ts es tree = (genericLength success / genericLength ts) * 100
-    where equals (Just a, a') = a == a'
-          equals (Nothing, _) = False
-          classifiedResult    = zip (fmap (classify tree) ts) es
+  accuracy ts expectedResults tree = (genericLength success / genericLength ts) * 100
+    where classifiedResult    = zip (fmap (classify tree) ts) expectedResults
           success             = filter equals classifiedResult
+          equals (Just a, a') = a == a'
+          equals (Nothing, _) = False
