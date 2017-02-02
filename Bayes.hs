@@ -59,7 +59,8 @@ module Bayes where
     return (doubleRatio hypothesis event xs ys)
 
   probabilityH :: String -> String -> Table -> Result Double
-  probabilityH header hypothesis table = notFound header $ singleRatio hypothesis <$> M.lookup header table
+  probabilityH header hypothesis table =
+    notFound header $ singleRatio hypothesis <$> M.lookup header table
 
   accuracy :: Table -> [(String, String)] -> [[(String, String)]] -> [String] -> Result Double
   accuracy table classes testSet outcomes = do

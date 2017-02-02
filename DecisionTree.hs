@@ -5,9 +5,10 @@ module DecisionTree where
   import Data.List.Split (splitOn)
   import Data.Foldable hiding (sum)
   import Control.Arrow (second, (&&&))
-  import Training (splitRandom, createRowsFrom)
+  import Training
   import System.Random (getStdGen, StdGen)
   import Data.Maybe (fromMaybe, catMaybes)
+  import qualified Data.Map.Strict as M
 
   test :: [T.Text]
   test = fmap T.pack ["x","y","n","t","l","f","c","b","p","e","r","s","y","w","w","p","w","o","p","n","y"]
@@ -27,33 +28,12 @@ module DecisionTree where
   classifyTest file testInput stdGen =
     let (headers, rows)     = createRowsFrom file
         (trainSet, testSet) = splitRandom (1/3) rows stdGen
-        testToClassify      = parseInput testInput
+        testToClassify      = splitOn "," testInput
         --tree                = buildTreeWith headers testSet
         --classifiedTest      = classify tree (zip headers testToClassify)
         trainSet'           = fmap (head &&& tail) trainSet
         --trainingRatio       = accuracy undefined undefined tree
     in trainSet --maybe NoResult (Result trainingRatio testInput) classifiedTest
-
-  parseInput :: String -> [String]
-  parseInput = splitOn ","
-
-
-  data Result = NoResult
-              | Result
-                { percentage :: Double
-                , testSet    :: String
-                , outCome    :: String
-                }
-
-  instance Show Result where
-    show NoResult = "No Result due to error."
-    show result   = "The classification of: " ++
-                    testSet result            ++
-                    " resulted in: "          ++
-                    outCome result            ++
-                    " with an accuracy of: "  ++
-                    show (percentage result)  ++
-                    " percent."
 
   -- | A DecisionTree consists of either a Node or Leaf
   -- A node has multiple branches and a Leaf has the classification value
@@ -63,6 +43,8 @@ module DecisionTree where
 
   -- | A branch has a tag a value and child DecisionTree attached to it
   data Branch a = Branch a (DecisionTree a) deriving Show
+
+  type Table a = M.Map a a
 
   -- | Getter of the tag of a Branch
   tag :: Branch a -> a
@@ -84,6 +66,9 @@ module DecisionTree where
     where p t'     = genericLength t' / genericLength xs
           tss      = fmap subset (nub ys)
           subset x = fmap fst . filter ((==) x . snd) $ zip xs ys
+
+  id3 :: Eq a => [a] -> Table a -> DecisionTree a
+  id3 = undefined
 
   -- | Builds the tree based on ID3 algorithm
   -- cs is a list of class attributes that form the goal of the classifier
@@ -111,13 +96,6 @@ module DecisionTree where
         table'  = filter ((/=) extract . fst) table  -- filter the table without the already selected column
         table'' = fmap (second $ fmap snd . filter fst . zip fs') table' -- filter out all the other columns on the selected feature
     in  (xs', table'')
-
-
-  -- | Helper that checks wether all the elements in a list are the same
-  -- (empty is false)
-  allTheSame :: Eq a => [a] -> Bool
-  allTheSame [] = False
-  allTheSame xs = all (== head xs) (tail xs)
 
   classify :: Eq a => DecisionTree a -> [(a, a)] -> Maybe a
   classify (Node a bs) xs = do
